@@ -9,6 +9,7 @@ final class EditorSession {
     let textView = EditorTextView(frame: .zero)
 
     var currentFileURL: URL?
+    var currentFileEncoding: String.Encoding = .utf8
     let autosaveURL: URL
     var saveWorkItem: DispatchWorkItem?
     var redrawWorkItem: DispatchWorkItem?

@@ -137,7 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NS
     func focusCurrentEditor() {
         guard let window, let session = currentSession() else { return }
         window.makeFirstResponder(session.textView)
-        session.textView.setSelectedRange(NSRange(location: 0, length: 0))
         requestRedraw(for: session, gutter: true, editor: true)
         DispatchQueue.main.async { [weak self] in
             guard let self, let session = self.currentSession() else { return }
