@@ -23,6 +23,7 @@ extension AppDelegate {
         let item = NSTabViewItem(identifier: session.id.uuidString)
         if let preferredLabel, !preferredLabel.isEmpty {
             item.label = preferredLabel
+            syncUntitledCounterIfNeeded(from: preferredLabel)
         } else {
             item.label = "Untitled \(untitledCounter)"
             untitledCounter += 1
@@ -166,5 +167,13 @@ extension AppDelegate {
         button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         button.setButtonType(.toggle)
         return button
+    }
+
+    private func syncUntitledCounterIfNeeded(from label: String) {
+        let prefix = "Untitled "
+        guard label.hasPrefix(prefix) else { return }
+        let suffix = label.dropFirst(prefix.count)
+        guard let number = Int(suffix), number >= untitledCounter else { return }
+        untitledCounter = number + 1
     }
 }

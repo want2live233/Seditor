@@ -1,12 +1,43 @@
 import AppKit
+import CoreFoundation
 import UniformTypeIdentifiers
 
 @MainActor
 extension AppDelegate {
+    private static let gb2312CFEncoding = CFStringEncoding(0x0630)
+    private static let gbkCFEncoding = CFStringEncoding(0x0631)
+    private static let gb18030CFEncoding = CFStringEncoding(0x0632)
+
+    private var gb2312Encoding: String.Encoding {
+        .init(rawValue: CFStringConvertEncodingToNSStringEncoding(Self.gb2312CFEncoding))
+    }
+
+    private var gbkEncoding: String.Encoding {
+        .init(rawValue: CFStringConvertEncodingToNSStringEncoding(Self.gbkCFEncoding))
+    }
+
+    private var gb18030Encoding: String.Encoding {
+        .init(rawValue: CFStringConvertEncodingToNSStringEncoding(Self.gb18030CFEncoding))
+    }
+
+    private var supportedOpenEncodings: [String.Encoding] {
+        [.utf8, gb18030Encoding, gbkEncoding, gb2312Encoding]
+    }
+
+    private func readText(at url: URL) throws -> (content: String, encoding: String.Encoding) {
+        let data = try Data(contentsOf: url)
+        for encoding in supportedOpenEncodings {
+            if let content = String(data: data, encoding: encoding) {
+                return (content, encoding)
+            }
+        }
+        throw CocoaError(.fileReadInapplicableStringEncoding)
+    }
+
     func saveToCurrentFile(session: EditorSession) {
         guard let url = session.currentFileURL else { return }
         do {
-            try session.textView.string.write(to: url, atomically: true, encoding: .utf8)
+            try session.textView.string.write(to: url, atomically: true, encoding: session.currentFileEncoding)
             updateTabLabel(for: session)
             updateWindowTitle()
         } catch {
@@ -28,12 +59,13 @@ extension AppDelegate {
 
             for url in panel.urls {
                 do {
-                    let content = try String(contentsOf: url, encoding: .utf8)
+                    let loaded = try self.readText(at: url)
                     self.createNewTab(select: true)
                     guard let session = self.currentSession() else { continue }
-                    session.textView.string = content
+                    session.textView.string = loaded.content
                     session.gutterView.invalidateCaches()
                     session.currentFileURL = url
+                    session.currentFileEncoding = loaded.encoding
                     self.updateTabLabel(for: session)
                     self.requestRedraw(for: session, gutter: true, editor: true)
                 } catch {
