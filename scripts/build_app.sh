@@ -62,6 +62,29 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>AppIcon</string>
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Text Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.plain-text</string>
+        <string>public.text</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>txt</string>
+        <string>text</string>
+        <string>md</string>
+        <string>log</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
