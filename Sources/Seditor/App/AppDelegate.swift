@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NS
     var editorFontSize: CGFloat = 14
     var editorTheme: EditorTheme = .system
     let redrawInterval: TimeInterval = 1.0 / 60.0
+    var hasCompletedInitialWorkspaceRestore = false
 
     lazy var autosaveDirectoryURL: URL = {
         let fm = FileManager.default
@@ -51,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NS
 
         setupTabView(in: window)
         restoreTabsOrCreateDefault()
+        hasCompletedInitialWorkspaceRestore = true
+        persistWorkspaceState()
 
         self.window = window
         window.makeKeyAndOrderFront(nil)
@@ -178,6 +181,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NS
             session.saveWorkItem?.cancel()
             saveAutosave(for: session)
         }
-        persistWorkspaceState()
+        persistWorkspaceState(force: true)
     }
 }

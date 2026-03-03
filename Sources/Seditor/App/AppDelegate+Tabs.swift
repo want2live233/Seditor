@@ -1,5 +1,11 @@
 import AppKit
 
+private enum CloseTabDecision {
+    case save
+    case dontSave
+    case cancel
+}
+
 @MainActor
 extension AppDelegate {
     @discardableResult
@@ -77,6 +83,22 @@ extension AppDelegate {
 
         let key = ObjectIdentifier(item)
         if let session = tabItemToSession[key] {
+            if session.hasPendingUnsavedChanges {
+                switch promptCloseDecision(for: item.label) {
+                case .save:
+                    guard saveSessionBeforeClosing(session) else { return }
+                case .dontSave:
+                    session.saveWorkItem?.cancel()
+                    session.saveWorkItem = nil
+                case .cancel:
+                    return
+                }
+            } else {
+                session.saveWorkItem?.cancel()
+                session.saveWorkItem = nil
+                _ = saveAutosave(for: session)
+            }
+
             NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: session.editorScrollView.contentView)
             textViewToSession.removeValue(forKey: ObjectIdentifier(session.textView))
             clipViewToSession.removeValue(forKey: ObjectIdentifier(session.editorScrollView.contentView))
@@ -126,7 +148,9 @@ extension AppDelegate {
             }
 
             button.title = item.label
-            button.state = (item == tabView.selectedTabViewItem) ? .on : .off
+            let isSelected = (item == tabView.selectedTabViewItem)
+            button.state = isSelected ? .on : .off
+            styleTabButton(button, title: item.label, selected: isSelected)
 
             if let previousButton,
                tabButtonsStack.arrangedSubviews.firstIndex(of: button) ?? 0 <= tabButtonsStack.arrangedSubviews.firstIndex(of: previousButton) ?? -1 {
@@ -162,11 +186,28 @@ extension AppDelegate {
     func makeTabButton(id: String) -> NSButton {
         let button = NSButton(title: "", target: self, action: #selector(selectTabFromButton(_:)))
         button.identifier = NSUserInterfaceItemIdentifier(id)
-        button.bezelStyle = .rounded
-        button.isBordered = true
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
         button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         button.setButtonType(.toggle)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
         return button
+    }
+
+    private func styleTabButton(_ button: NSButton, title: String, selected: Bool) {
+        let textColor: NSColor = selected ? .controlAccentColor : .labelColor
+        let font = NSFont.systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: font,
+                .foregroundColor: textColor
+            ]
+        )
+        button.layer?.backgroundColor = selected
+            ? NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+            : NSColor.clear.cgColor
     }
 
     private func syncUntitledCounterIfNeeded(from label: String) {
@@ -175,5 +216,41 @@ extension AppDelegate {
         let suffix = label.dropFirst(prefix.count)
         guard let number = Int(suffix), number >= untitledCounter else { return }
         untitledCounter = number + 1
+    }
+
+    private func promptCloseDecision(for tabLabel: String) -> CloseTabDecision {
+        let alert = NSAlert()
+        alert.messageText = "Do you want to save the changes made to \"\(tabLabel)\"?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .save
+        case .alertSecondButtonReturn:
+            return .dontSave
+        default:
+            return .cancel
+        }
+    }
+
+    private func saveSessionBeforeClosing(_ session: EditorSession) -> Bool {
+        if session.currentFileURL != nil {
+            return saveToCurrentFile(session: session)
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "note.txt"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return false
+        }
+
+        session.currentFileURL = url
+        return saveToCurrentFile(session: session)
     }
 }

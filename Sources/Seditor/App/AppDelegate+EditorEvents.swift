@@ -10,23 +10,41 @@ extension AppDelegate {
 
         session.gutterView.invalidateCaches()
         requestRedraw(for: session, gutter: true, editor: false)
+        session.hasPendingUnsavedChanges = true
         scheduleAutosave(for: session)
     }
 
     func scheduleAutosave(for session: EditorSession) {
         session.saveWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            self?.saveAutosave(for: session)
+        let item = DispatchWorkItem { [weak self, weak session] in
+            guard let self, let session else { return }
+            session.saveWorkItem = nil
+            _ = self.saveAutosave(for: session)
         }
         session.saveWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: item)
     }
 
-    func saveAutosave(for session: EditorSession) {
+    @discardableResult
+    func saveAutosave(for session: EditorSession) -> Bool {
+        if let fileURL = session.currentFileURL,
+           FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try session.textView.string.write(to: fileURL, atomically: true, encoding: session.currentFileEncoding)
+                session.hasPendingUnsavedChanges = false
+                return true
+            } catch {
+                // Fall back to autosave file to avoid data loss.
+            }
+        }
+
         do {
             try session.textView.string.write(to: session.autosaveURL, atomically: true, encoding: .utf8)
+            session.hasPendingUnsavedChanges = false
+            return true
         } catch {
             NSSound.beep()
+            return false
         }
     }
 
