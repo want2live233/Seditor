@@ -4,7 +4,7 @@
 
 ![Dark theme](img/2026-02-19_21-49-11.png)
 
-## 最近更新（2026-03-02）
+## 最近更新（2026-03-03）
 
 - 新增编码支持：打开文件自动识别 `UTF-8 / GB18030 / GBK / GB2312`。
 - 保存策略调整：已打开文件保存时沿用原编码；新建文件默认 `UTF-8`。
@@ -12,6 +12,7 @@
 - 修复命名问题：恢复会话后会同步 `Untitled N` 计数器，避免新标签重名。
 - 新增编码测试样例：`samples/encodings/` 下提供 GB 系编码测试文本。
 - 仓库忽略项：新增 `.gitignore`，忽略 `.build/` 与 `dist/` 构建产物。
+- 修复文件打开错误：解决 `The document “x.txt” could not be opened. Seditor cannot open files in the “text” format.`，现在通过 Finder“打开方式 -> Seditor”可正常打开 `text/txt` 文件，且不再出现同名空白重复标签。
 
 ## 已实现
 

@@ -14,6 +14,15 @@ private struct PersistedWorkspace: Codable {
 @MainActor
 extension AppDelegate {
     func restoreTabsOrCreateDefault() {
+        // Files can be opened by the system before app launch finishes.
+        // If tabs already exist, skip restore/default creation to avoid duplicates.
+        if tabView.numberOfTabViewItems > 0 {
+            syncTabButtons()
+            updateWindowTitle()
+            persistWorkspaceState()
+            return
+        }
+
         guard let workspace = loadPersistedWorkspace(), !workspace.tabs.isEmpty else {
             createNewTab(select: true)
             persistWorkspaceState()
@@ -72,4 +81,3 @@ extension AppDelegate {
         return try? JSONDecoder().decode(PersistedWorkspace.self, from: data)
     }
 }
-
