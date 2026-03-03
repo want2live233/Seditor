@@ -12,6 +12,7 @@ final class EditorSession {
     var currentFileEncoding: String.Encoding = .utf8
     let autosaveURL: URL
     var saveWorkItem: DispatchWorkItem?
+    var hasPendingUnsavedChanges = false
     var redrawWorkItem: DispatchWorkItem?
     var pendingGutterRedraw = false
     var pendingEditorRedraw = false

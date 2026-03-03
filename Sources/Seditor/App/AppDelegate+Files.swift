@@ -24,7 +24,7 @@ extension AppDelegate {
         [.utf8, gb18030Encoding, gbkEncoding, gb2312Encoding]
     }
 
-    private func readText(at url: URL) throws -> (content: String, encoding: String.Encoding) {
+    func readText(at url: URL) throws -> (content: String, encoding: String.Encoding) {
         let data = try Data(contentsOf: url)
         for encoding in supportedOpenEncodings {
             if let content = String(data: data, encoding: encoding) {
@@ -90,14 +90,18 @@ extension AppDelegate {
         return openedAny
     }
 
-    func saveToCurrentFile(session: EditorSession) {
-        guard let url = session.currentFileURL else { return }
+    @discardableResult
+    func saveToCurrentFile(session: EditorSession) -> Bool {
+        guard let url = session.currentFileURL else { return false }
         do {
             try session.textView.string.write(to: url, atomically: true, encoding: session.currentFileEncoding)
+            session.hasPendingUnsavedChanges = false
             updateTabLabel(for: session)
             updateWindowTitle()
+            return true
         } catch {
             NSSound.beep()
+            return false
         }
     }
 
