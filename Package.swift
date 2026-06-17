@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Seditor",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v13)
     ],
@@ -12,7 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Seditor",
-            path: "Sources/Seditor"
+            path: "Sources/Seditor",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )

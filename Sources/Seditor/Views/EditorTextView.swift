@@ -6,6 +6,7 @@ final class EditorTextView: NSTextView {
     var caretColor: NSColor = NSColor.systemBlue
     var caretWidthScale: CGFloat = 1.6
     var caretHeightScale: CGFloat = 1.25
+    var onMagnify: ((CGFloat) -> Void)?
 
     private var currentCaretDrawRect: NSRect?
     private var caretVisible = true
@@ -93,6 +94,12 @@ final class EditorTextView: NSTextView {
     }
 
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        if hasMarkedText() {
+            currentCaretDrawRect = nil
+            super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
+            return
+        }
+
         let previousRect = currentCaretDrawRect
         let nextRect = scaledCaretRect(for: rect)
 
@@ -103,6 +110,10 @@ final class EditorTextView: NSTextView {
         currentCaretDrawRect = nextRect
         setNeedsDisplay(nextRect.insetBy(dx: -2, dy: -2).integral)
 
+    }
+
+    override func magnify(with event: NSEvent) {
+        onMagnify?(event.magnification)
     }
 
     private func scaledCaretRect(for rect: NSRect) -> NSRect {

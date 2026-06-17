@@ -5,12 +5,18 @@ extension AppDelegate {
     func textDidChange(_ notification: Notification) {
         guard
             let textView = notification.object as? NSTextView,
-            let session = textViewToSession[ObjectIdentifier(textView)]
+            let session = workspaceController.session(for: textView)
         else { return }
 
         session.gutterView.invalidateCaches()
         requestRedraw(for: session, gutter: true, editor: false)
+        let wasPendingUnsavedChanges = session.hasPendingUnsavedChanges
         session.hasPendingUnsavedChanges = true
+        if !wasPendingUnsavedChanges {
+            syncTabButtons()
+            persistWorkspaceState()
+        }
+        updateStatusBar(for: session)
         scheduleAutosave(for: session)
     }
 
@@ -27,20 +33,8 @@ extension AppDelegate {
 
     @discardableResult
     func saveAutosave(for session: EditorSession) -> Bool {
-        if let fileURL = session.currentFileURL,
-           FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                try session.textView.string.write(to: fileURL, atomically: true, encoding: session.currentFileEncoding)
-                session.hasPendingUnsavedChanges = false
-                return true
-            } catch {
-                // Fall back to autosave file to avoid data loss.
-            }
-        }
-
         do {
             try session.textView.string.write(to: session.autosaveURL, atomically: true, encoding: .utf8)
-            session.hasPendingUnsavedChanges = false
             return true
         } catch {
             NSSound.beep()
@@ -50,7 +44,7 @@ extension AppDelegate {
 
     @objc func editorDidScroll(_ notification: Notification) {
         guard let clip = notification.object as? NSClipView,
-              let session = clipViewToSession[ObjectIdentifier(clip)]
+              let session = workspaceController.session(for: clip)
         else { return }
         requestRedraw(for: session, gutter: true, editor: true)
     }
@@ -58,8 +52,9 @@ extension AppDelegate {
     func textViewDidChangeSelection(_ notification: Notification) {
         guard
             let textView = notification.object as? NSTextView,
-            let session = textViewToSession[ObjectIdentifier(textView)]
+            let session = workspaceController.session(for: textView)
         else { return }
         requestRedraw(for: session, gutter: true, editor: true)
+        updateStatusBar(for: session)
     }
 }

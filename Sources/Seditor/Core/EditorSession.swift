@@ -1,5 +1,10 @@
 import AppKit
 
+enum LineEndingStyle: String, Codable {
+    case lf
+    case crlf
+}
+
 @MainActor
 final class EditorSession {
     let id = UUID()
@@ -16,6 +21,9 @@ final class EditorSession {
     var redrawWorkItem: DispatchWorkItem?
     var pendingGutterRedraw = false
     var pendingEditorRedraw = false
+    var knownFileModificationDate: Date?
+    var ignoredExternalModificationDate: Date?
+    var preferredLineEnding: LineEndingStyle = .lf
 
     init(autosaveURL: URL) {
         self.autosaveURL = autosaveURL
@@ -52,6 +60,7 @@ final class EditorSession {
 
         textView.isEditable = true
         textView.isSelectable = true
+        textView.allowsUndo = true
         textView.isRichText = false
         textView.importsGraphics = false
         textView.usesFindPanel = true

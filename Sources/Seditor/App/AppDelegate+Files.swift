@@ -34,75 +34,28 @@ extension AppDelegate {
         throw CocoaError(.fileReadInapplicableStringEncoding)
     }
 
-    private func canonicalPath(for url: URL) -> String {
+    func canonicalPath(for url: URL) -> String {
         url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     @discardableResult
-    private func openDocuments(at urls: [URL]) -> Bool {
-        guard !urls.isEmpty else { return true }
-        var openedAny = false
-        var seenCanonicalPaths = Set<String>()
-
-        for url in urls {
-            let canonical = canonicalPath(for: url)
-            if !seenCanonicalPaths.insert(canonical).inserted { continue }
-            do {
-                let loaded = try readText(at: url)
-                let existingSession = tabItemToSession.values.first {
-                    guard let currentFileURL = $0.currentFileURL else { return false }
-                    return canonicalPath(for: currentFileURL) == canonical
-                }
-                let reusableBlankSession: EditorSession? = {
-                    guard tabView.numberOfTabViewItems == 1, let only = currentSession() else { return nil }
-                    return (only.currentFileURL == nil && only.textView.string.isEmpty) ? only : nil
-                }()
-                let session: EditorSession
-                if let existingSession {
-                    session = existingSession
-                } else if let reusableBlankSession {
-                    session = reusableBlankSession
-                } else {
-                    createNewTab(select: true)
-                    guard let created = currentSession() else { continue }
-                    session = created
-                }
-                session.textView.string = loaded.content
-                session.gutterView.invalidateCaches()
-                session.currentFileURL = URL(fileURLWithPath: canonical)
-                session.currentFileEncoding = loaded.encoding
-                updateTabLabel(for: session)
-                requestRedraw(for: session, gutter: true, editor: true)
-                if let item = tabView.tabViewItems.first(where: { tabItemToSession[ObjectIdentifier($0)] === session }) {
-                    tabView.selectTabViewItem(item)
-                }
-                openedAny = true
-            } catch {
-                NSSound.beep()
-            }
+    func openDocuments(at urls: [URL]) -> Bool {
+        let opened = workspaceController.openDocuments(at: urls)
+        if opened {
+            refreshKnownModificationDatesForOpenFiles()
+            refreshPreferredLineEndingsForOpenFiles()
         }
-
-        if openedAny {
-            updateWindowTitle()
-            focusCurrentEditor()
-        }
-
-        return openedAny
+        return opened
     }
 
     @discardableResult
     func saveToCurrentFile(session: EditorSession) -> Bool {
-        guard let url = session.currentFileURL else { return false }
-        do {
-            try session.textView.string.write(to: url, atomically: true, encoding: session.currentFileEncoding)
-            session.hasPendingUnsavedChanges = false
-            updateTabLabel(for: session)
-            updateWindowTitle()
-            return true
-        } catch {
-            NSSound.beep()
-            return false
+        let saved = workspaceController.saveToCurrentFile(session: session)
+        if saved {
+            updateKnownModificationDate(for: session)
+            updateStatusBar(for: session)
         }
+        return saved
     }
 
     @objc func openDocument() {
@@ -143,7 +96,7 @@ extension AppDelegate {
         guard let window, let session = currentSession() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = session.currentFileURL?.lastPathComponent ?? "note.txt"
+        panel.nameFieldStringValue = session.currentFileURL?.lastPathComponent ?? L10n.t("file.defaultName", "note.txt")
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }

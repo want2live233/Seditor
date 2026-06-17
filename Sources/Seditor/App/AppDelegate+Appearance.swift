@@ -3,9 +3,10 @@ import AppKit
 @MainActor
 extension AppDelegate {
     func applyTheme() {
-        for (_, session) in tabItemToSession {
+        for session in workspaceController.allSessions() {
             applyTheme(to: session)
         }
+        updateStatusBarAppearance()
     }
 
     func applyTheme(to session: EditorSession) {
@@ -71,7 +72,7 @@ extension AppDelegate {
     }
 
     func applyFontSize() {
-        for (_, session) in tabItemToSession {
+        for session in workspaceController.allSessions() {
             applyFontSize(to: session)
         }
     }
