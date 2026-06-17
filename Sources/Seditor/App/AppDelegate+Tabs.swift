@@ -1,11 +1,5 @@
 import AppKit
 
-private enum CloseTabDecision {
-    case save
-    case dontSave
-    case cancel
-}
-
 @MainActor
 extension AppDelegate {
     @discardableResult
@@ -17,110 +11,30 @@ extension AppDelegate {
         select: Bool,
         persist: Bool = true
     ) -> EditorSession {
-        let session = EditorSession(autosaveURL: autosaveURL)
-        session.textView.delegate = self
-        session.textView.string = initialContent
-        session.currentFileURL = fileURL
-        session.gutterView.invalidateCaches()
-
-        applyTheme(to: session)
-        applyFontSize(to: session)
-
-        let item = NSTabViewItem(identifier: session.id.uuidString)
-        if let preferredLabel, !preferredLabel.isEmpty {
-            item.label = preferredLabel
-            syncUntitledCounterIfNeeded(from: preferredLabel)
-        } else {
-            item.label = "Untitled \(untitledCounter)"
-            untitledCounter += 1
-        }
-        item.view = session.rootView
-
-        tabView.addTabViewItem(item)
-        if select {
-            tabView.selectTabViewItem(item)
-        }
-
-        tabItemToSession[ObjectIdentifier(item)] = session
-        textViewToSession[ObjectIdentifier(session.textView)] = session
-        clipViewToSession[ObjectIdentifier(session.editorScrollView.contentView)] = session
-
-        let clip = session.editorScrollView.contentView
-        clip.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(editorDidScroll(_:)),
-            name: NSView.boundsDidChangeNotification,
-            object: clip
+        workspaceController.createTab(
+            autosaveURL: autosaveURL,
+            initialContent: initialContent,
+            fileURL: fileURL,
+            preferredLabel: preferredLabel,
+            select: select,
+            persist: persist
         )
-
-        syncTabButtons()
-        updateWindowTitle()
-        requestRedraw(for: session, gutter: true, editor: true)
-        if persist { persistWorkspaceState() }
-        if select {
-            DispatchQueue.main.async { [weak self] in
-                self?.focusCurrentEditor()
-            }
-        }
-        return session
     }
 
     func createNewTab(select: Bool) {
-        let autosaveURL = autosaveDirectoryURL.appendingPathComponent("autosave-\(UUID().uuidString).txt")
-        _ = createTab(
-            autosaveURL: autosaveURL,
-            initialContent: "",
-            fileURL: nil,
-            preferredLabel: nil,
-            select: select
-        )
+        _ = workspaceController.createNewTab(select: select)
     }
 
     func closeCurrentTab() {
-        guard let item = currentTabItem() else { return }
-        guard tabView.numberOfTabViewItems > 1 else { return }
+        _ = workspaceController.closeCurrentTab()
+    }
 
-        let key = ObjectIdentifier(item)
-        if let session = tabItemToSession[key] {
-            if session.hasPendingUnsavedChanges {
-                switch promptCloseDecision(for: item.label) {
-                case .save:
-                    guard saveSessionBeforeClosing(session) else { return }
-                case .dontSave:
-                    session.saveWorkItem?.cancel()
-                    session.saveWorkItem = nil
-                case .cancel:
-                    return
-                }
-            } else {
-                session.saveWorkItem?.cancel()
-                session.saveWorkItem = nil
-                _ = saveAutosave(for: session)
-            }
-
-            NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: session.editorScrollView.contentView)
-            textViewToSession.removeValue(forKey: ObjectIdentifier(session.textView))
-            clipViewToSession.removeValue(forKey: ObjectIdentifier(session.editorScrollView.contentView))
-            tabItemToSession.removeValue(forKey: key)
-        }
-
-        tabView.removeTabViewItem(item)
-        syncTabButtons()
-        updateWindowTitle()
-        persistWorkspaceState()
-        focusCurrentEditor()
+    @objc func closeAllTabs() {
+        _ = workspaceController.closeAllTabs()
     }
 
     func updateTabLabel(for session: EditorSession) {
-        guard let item = tabView.tabViewItems.first(where: { tabItemToSession[ObjectIdentifier($0)] === session }) else { return }
-        if let fileURL = session.currentFileURL {
-            item.label = fileURL.lastPathComponent
-        } else if item.label.isEmpty {
-            item.label = "Untitled"
-        }
-        syncTabButtons()
-        persistWorkspaceState()
+        workspaceController.updateTabLabel(for: session)
     }
 
     func syncTabButtons() {
@@ -147,10 +61,12 @@ extension AppDelegate {
                 tabButtonsStack.addArrangedSubview(button)
             }
 
-            button.title = item.label
+            let displayTitle = decoratedTabTitle(for: item)
+            button.title = displayTitle
+            button.setAccessibilityLabel(displayTitle)
             let isSelected = (item == tabView.selectedTabViewItem)
             button.state = isSelected ? .on : .off
-            styleTabButton(button, title: item.label, selected: isSelected)
+            styleTabButton(button, title: displayTitle, selected: isSelected)
 
             if let previousButton,
                tabButtonsStack.arrangedSubviews.firstIndex(of: button) ?? 0 <= tabButtonsStack.arrangedSubviews.firstIndex(of: previousButton) ?? -1 {
@@ -164,6 +80,8 @@ extension AppDelegate {
             }
             previousButton = button
         }
+
+        updateEmptyStateVisibility()
     }
 
     @objc func selectTabFromButton(_ sender: NSButton) {
@@ -192,6 +110,7 @@ extension AppDelegate {
         button.setButtonType(.toggle)
         button.wantsLayer = true
         button.layer?.cornerRadius = 6
+        button.setAccessibilityRole(.radioButton)
         return button
     }
 
@@ -210,22 +129,24 @@ extension AppDelegate {
             : NSColor.clear.cgColor
     }
 
-    private func syncUntitledCounterIfNeeded(from label: String) {
-        let prefix = "Untitled "
-        guard label.hasPrefix(prefix) else { return }
-        let suffix = label.dropFirst(prefix.count)
-        guard let number = Int(suffix), number >= untitledCounter else { return }
-        untitledCounter = number + 1
+    private func decoratedTabTitle(for item: NSTabViewItem) -> String {
+        guard let session = workspaceController.session(for: item) else {
+            return item.label
+        }
+        if session.hasPendingUnsavedChanges {
+            return "● \(item.label)"
+        }
+        return item.label
     }
 
-    private func promptCloseDecision(for tabLabel: String) -> CloseTabDecision {
+    func promptCloseDecision(for tabLabel: String) -> WorkspaceCloseDecision {
         let alert = NSAlert()
-        alert.messageText = "Do you want to save the changes made to \"\(tabLabel)\"?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.messageText = String(format: L10n.t("prompt.unsaved.title", "Do you want to save the changes made to \"%@\"?"), tabLabel)
+        alert.informativeText = L10n.t("prompt.unsaved.message", "Your changes will be lost if you don't save them.")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.t("common.save", "Save"))
+        alert.addButton(withTitle: L10n.t("common.dontSave", "Don't Save"))
+        alert.addButton(withTitle: L10n.t("common.cancel", "Cancel"))
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
@@ -237,14 +158,14 @@ extension AppDelegate {
         }
     }
 
-    private func saveSessionBeforeClosing(_ session: EditorSession) -> Bool {
+    func saveSessionBeforeClosing(_ session: EditorSession) -> Bool {
         if session.currentFileURL != nil {
             return saveToCurrentFile(session: session)
         }
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = "note.txt"
+        panel.nameFieldStringValue = L10n.t("file.defaultName", "note.txt")
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return false
@@ -252,5 +173,17 @@ extension AppDelegate {
 
         session.currentFileURL = url
         return saveToCurrentFile(session: session)
+    }
+
+    func adjustFontSize(by magnification: CGFloat) {
+        let stepSize: CGFloat = 0.08
+        fontMagnificationAccumulator += magnification
+
+        let steps = Int(fontMagnificationAccumulator / stepSize)
+        guard steps != 0 else { return }
+
+        fontMagnificationAccumulator -= CGFloat(steps) * stepSize
+        editorFontSize = min(42, max(10, editorFontSize + CGFloat(steps)))
+        applyFontSize()
     }
 }

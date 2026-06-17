@@ -1,16 +1,5 @@
 import Foundation
 
-private struct PersistedTab: Codable {
-    let autosaveFileName: String
-    let currentFilePath: String?
-    let label: String?
-}
-
-private struct PersistedWorkspace: Codable {
-    let tabs: [PersistedTab]
-    let selectedIndex: Int
-}
-
 @MainActor
 extension AppDelegate {
     func restoreTabsOrCreateDefault() {
@@ -18,10 +7,8 @@ extension AppDelegate {
         // Merge restored tabs with already opened tabs instead of dropping either side.
         let hadTabsBeforeRestore = tabView.numberOfTabViewItems > 0
 
-        guard let workspace = loadPersistedWorkspace(), !workspace.tabs.isEmpty else {
-            if !hadTabsBeforeRestore {
-                createNewTab(select: true)
-            }
+        guard let workspace = workspacePersistenceService.loadWorkspaceState(), !workspace.tabs.isEmpty else {
+            syncTabButtons()
             persistWorkspaceState()
             return
         }
@@ -29,7 +16,7 @@ extension AppDelegate {
         var existingAutosaveNames = Set<String>()
         var existingCanonicalPaths = Set<String>()
         for item in tabView.tabViewItems {
-            guard let session = tabItemToSession[ObjectIdentifier(item)] else { continue }
+            guard let session = workspaceController.session(for: item) else { continue }
             existingAutosaveNames.insert(session.autosaveURL.lastPathComponent)
             if let currentFileURL = session.currentFileURL {
                 existingCanonicalPaths.insert(canonicalPathForRestore(currentFileURL))
@@ -37,45 +24,41 @@ extension AppDelegate {
         }
 
         for tab in workspace.tabs {
-            let autosaveURL = autosaveDirectoryURL.appendingPathComponent(tab.autosaveFileName)
-            let fileURL = tab.currentFilePath.map { URL(fileURLWithPath: $0) }
-
             if existingAutosaveNames.contains(tab.autosaveFileName) {
                 continue
             }
-            if let fileURL {
+
+            let restored = workspacePersistenceService.makeRestoredTabPayload(for: tab) { url in
+                try readText(at: url)
+            }
+
+            if let fileURL = restored.fileURL {
                 let canonical = canonicalPathForRestore(fileURL)
                 if existingCanonicalPaths.contains(canonical) {
                     continue
                 }
             }
 
-            let restoredContent: String
-            let restoredEncoding: String.Encoding
-            if let fileURL, let loaded = try? readText(at: fileURL) {
-                restoredContent = loaded.content
-                restoredEncoding = loaded.encoding
-            } else {
-                restoredContent = (try? String(contentsOf: autosaveURL, encoding: .utf8)) ?? ""
-                restoredEncoding = .utf8
-            }
-
             let session = createTab(
-                autosaveURL: autosaveURL,
-                initialContent: restoredContent,
-                fileURL: fileURL,
+                autosaveURL: restored.autosaveURL,
+                initialContent: restored.content,
+                fileURL: restored.fileURL,
                 preferredLabel: tab.label,
                 select: false,
                 persist: false
             )
-            session.currentFileEncoding = restoredEncoding
+            session.currentFileEncoding = restored.encoding
+            session.hasPendingUnsavedChanges = tab.hadPendingUnsavedChanges ?? false
+            session.preferredLineEnding = detectPreferredLineEnding(in: restored.content)
+            updateKnownModificationDate(for: session)
+
             existingAutosaveNames.insert(tab.autosaveFileName)
-            if let fileURL {
+            if let fileURL = restored.fileURL {
                 existingCanonicalPaths.insert(canonicalPathForRestore(fileURL))
             }
         }
 
-        if !hadTabsBeforeRestore {
+        if !hadTabsBeforeRestore, tabView.numberOfTabViewItems > 0 {
             let idx = min(max(0, workspace.selectedIndex), max(0, tabView.numberOfTabViewItems - 1))
             tabView.selectTabViewItem(at: idx)
         }
@@ -86,34 +69,24 @@ extension AppDelegate {
 
     func persistWorkspaceState(force: Bool = false) {
         guard force || hasCompletedInitialWorkspaceRestore else { return }
-        var tabs: [PersistedTab] = []
+        var tabs: [PersistedWorkspaceTab] = []
         tabs.reserveCapacity(tabView.numberOfTabViewItems)
 
         for item in tabView.tabViewItems {
-            guard let session = tabItemToSession[ObjectIdentifier(item)] else { continue }
+            guard let session = workspaceController.session(for: item) else { continue }
             tabs.append(
-                PersistedTab(
+                PersistedWorkspaceTab(
                     autosaveFileName: session.autosaveURL.lastPathComponent,
                     currentFilePath: session.currentFileURL?.path,
-                    label: item.label
+                    label: item.label,
+                    hadPendingUnsavedChanges: session.hasPendingUnsavedChanges
                 )
             )
         }
 
         let selectedIndex = tabView.selectedTabViewItem.map { tabView.indexOfTabViewItem($0) } ?? 0
-        let workspace = PersistedWorkspace(tabs: tabs, selectedIndex: max(0, selectedIndex))
-
-        do {
-            let data = try JSONEncoder().encode(workspace)
-            try data.write(to: sessionStateURL, options: .atomic)
-        } catch {
-            // Non-fatal: autosave content still exists per tab.
-        }
-    }
-
-    private func loadPersistedWorkspace() -> PersistedWorkspace? {
-        guard let data = try? Data(contentsOf: sessionStateURL) else { return nil }
-        return try? JSONDecoder().decode(PersistedWorkspace.self, from: data)
+        let state = PersistedWorkspaceState(tabs: tabs, selectedIndex: max(0, selectedIndex))
+        workspacePersistenceService.saveWorkspaceState(state)
     }
 
     private func canonicalPathForRestore(_ url: URL) -> String {
